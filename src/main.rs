@@ -39,6 +39,12 @@ fn main() {
     let mut var_f1 = 0f64;
     let mut best_f1 = 0f64;
     let mut worst_f1 = 1f64;
+    let mut mean_instantiate = 0f64;
+    let mut var_instantiate = 0f64;
+    let mut mean_tokenization = 0f64;
+    let mut var_tokenization = 0f64;
+    let mut mean_total_time = 0f64;
+    let mut var_total_time = 0f64;
     let times = 100; // run montecarlo simulation for 10 times
     let unknown_count = (words.len() as f64 * 0.1) as usize; // 10% of dictionary
 
@@ -68,14 +74,17 @@ fn main() {
         // measure time it take 
         let instantiate_time = Instant::now();
         let tokenizer = th::Tokenizer::from(tok_dic);
-        println!("Simulation {} has total tokenizer instantiate time {} ms", k, instantiate_time.elapsed().as_millis());
+        let instantiate_time = instantiate_time.elapsed().as_millis() as f64;
+        println!("Simulation {} has total tokenizer instantiate time {} ms", k, instantiate_time);
+
         // let dict = tokenizer::dict::SizedDict::from(words);
 
         let begin = Instant::now();
 
         let tokens = tokenizer.tokenize(&test_text);
         
-        println!("Simulation {} tokenization is done in {} ms", k, begin.elapsed().as_millis());
+        let tokenize_time = begin.elapsed().as_millis() as f64;
+        println!("Simulation {} tokenization is done in {} ms", k, tokenize_time);
 
         let actual_positive = expected.len();
         let predicted_positive = tokens.len();
@@ -107,23 +116,38 @@ fn main() {
             }
         }
 
-        let processed_time = begin.elapsed().as_millis();
+        let processed_time = begin.elapsed().as_millis() as f64;
         let precision = (true_positive as f64) / (predicted_positive as f64);
         let recall = (true_positive as f64) / (actual_positive as f64);
         
         let f1_score = 2f64 * (precision * recall) / (precision + recall);
-        let prev_mean = mean_f1;
         if k > 0 {
+            let prev_mean = mean_f1;
+            let prev_instantiate_time = mean_instantiate;
+            let prev_tokenize_time = mean_tokenization;
+            let prev_processed_time = mean_total_time;
             // k is 0 based while in math formula k is 1 based. So the formula is adjusted to reflex this.
+            
             mean_f1 = ((mean_f1 * k as f64) + f1_score) / (k + 1) as f64; 
+            mean_instantiate = ((mean_instantiate * k  as f64) + instantiate_time) / (k + 1) as f64;
+            mean_tokenization = ((mean_tokenization * k as f64) + tokenize_time) / (k + 1) as f64; 
+            mean_total_time = ((mean_total_time * k as f64) + processed_time) / (k + 1) as f64; 
+            var_f1 = var_f1 + (f1_score - prev_mean) * (f1_score - mean_f1);
+            var_instantiate = var_instantiate + (instantiate_time - prev_instantiate_time) * (instantiate_time - mean_instantiate);
+            var_tokenization = var_tokenization + (tokenize_time - prev_tokenize_time) * (tokenize_time - mean_total_time);
+            var_total_time = var_total_time + (processed_time - prev_processed_time) * (processed_time - mean_total_time);
         } else {
             mean_f1 = f1_score;
+            mean_instantiate = instantiate_time as f64;
+            mean_tokenization = tokenize_time as f64;
+            mean_total_time = processed_time as f64;
         }
 
-        if k > 1 {
-            // k is 0 based while in math formula k must be 1 based. So the formula is adjusted to reflex this.
-            var_f1 = ((k - 1) as f64 * var_f1 + k as f64 * (prev_mean - mean_f1).powi(2) + (f1_score - mean_f1).powi(2)) / k as f64;
-        }
+        // if k > 1 {
+        //     // k is 0 based while in math formula k must be 1 based. So the formula is adjusted to reflex this.
+        //     var_f1 = ((k - 1) as f64 * var_f1 + k as f64 * (prev_mean - mean_f1).powi(2) + (f1_score - mean_f1).powi(2)) / k as f64;
+        //     var_instantiate = (k as f64 * var_instantiate + (instantiate_time as f64 - prev_instantiate_time) * (instantiate_time as f64 * mean_instantiate)) / (k + 1) as f64;
+        // }
 
         if f1_score > best_f1 {
             best_f1 = f1_score;
@@ -134,13 +158,22 @@ fn main() {
         }
 
         println!("Simulation {} got F1 score = {}", k, f1_score);
-        println!("Simulation {} take total processing time = {} m {} s {} ms", k, processed_time / 60_000, (processed_time / 1000) % 60, processed_time % 1000);
+        println!("Simulation {} take total processing time = {} m {} s {} ms", k, processed_time / 60_000f64, (processed_time / 1000f64) % 60f64, processed_time % 1000f64);
     }
 
     println!("Average F1 score = {}", mean_f1);
-    println!("F1 variance = {}", var_f1);
+    println!("F1 variance = {}", var_f1 / (times - 1) as f64);
     println!("Best F1 score = {}", best_f1);
     println!("Worst F1 score = {}", worst_f1);
-    println!("Margin of error at 95% for F1 = {}", (1.984 * var_f1 / ((times - 1) as f64).powf(0.5)));
-    println!("Margin of error at 99% for F1 = {}", (3.391 * var_f1 / ((times - 1) as f64).powf(0.5)));
+    println!("Margin of error at 95% for F1 = {}", (1.984 * (var_f1 / (times - 1) as f64).powf(0.5)) / ((times - 1) as f64).powf(0.5));
+    println!("Margin of error at 99% for F1 = {}", (2.626 * (var_f1 / (times - 1) as f64).powf(0.5)));
+    println!("Mean tokenizer instantiation time = {} ms", mean_instantiate);
+    println!("Var tokenizer instantiation time = {} ms", var_instantiate / (times - 1) as f64);
+    println!("Margin of error at 95% for instantiation time = {}", 1.984 * (var_instantiate / (times - 1) as f64).powf(0.5) / ((times - 1) as f64).powf(0.5));
+    println!("Mean tokenizer tokenization time = {} ms", mean_tokenization);
+    println!("Var tokenizer tokenization time = {} ms", var_tokenization/ (times - 1) as f64);
+    println!("Margin of error at 95% for tokenization time = {}", 1.984 * (var_tokenization / (times - 1) as f64).powf(0.5) / ((times - 1) as f64).powf(0.5));
+    println!("Mean total time = {} ms", mean_total_time);
+    println!("Var total time = {} ms", var_total_time / (times - 1) as f64);
+    println!("Margin of error at 95% for total processing time = {}", 1.984 * (var_total_time / (times - 1) as f64).powf(0.5) / ((times - 1) as f64).powf(0.5));
 }
